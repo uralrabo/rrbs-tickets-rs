@@ -62,7 +62,24 @@ pub mod ticket_actions {
 pub enum TicketViewMode {
     Regular,
     Half,
-    List
+    List,
+    Kanban,
+    Calendar
+}
+
+pub struct BoardState {
+    pub columns: Vec<String>,
+    pub order_changed: bool,
+    pub cal_year: i32,
+    pub cal_month: u32,
+}
+
+impl Default for BoardState {
+    fn default() -> Self {
+        use chrono::Datelike;
+        let now = chrono::Local::now();
+        BoardState { columns: vec![], order_changed: false, cal_year: now.year(), cal_month: now.month() }
+    }
 }
 
 
@@ -80,6 +97,7 @@ pub struct UIController {
     pub show_sidebar: bool,
     pub font_changed: bool,
     pub ticket_view_mode: TicketViewMode,
+    pub board: BoardState,
     pub configuration: Arc<Mutex<AppConfig>>, 
     pub ticket_provider: Arc<Mutex<TicketProvider>>,
     pub invalidate_cache: bool,
@@ -87,6 +105,7 @@ pub struct UIController {
     open_folders: Rc<RefCell<Vec<String>>>,
     selected_filters: Rc<RefCell<Vec<BucketPanelLocation>>>,
     visible_tickets: Vec<Ticket>,
+    all_tickets: Vec<Ticket>,
     overlay: Overlay,
     pub update_panel_data: Arc<Mutex<bool>>
 }
@@ -99,6 +118,7 @@ impl UIController {
 
         let mut overlay = Overlay::None;
         let mut ticket_view_mode = TicketViewMode::Regular;
+        let mut board = BoardState::default();
         let mut show_sidebar = true;
 
         match configuration.lock() {
@@ -116,8 +136,16 @@ impl UIController {
                     "regular" => ticket_view_mode = TicketViewMode::Regular,
                     "half" => ticket_view_mode = TicketViewMode::Half,
                     "list" => ticket_view_mode = TicketViewMode::List,
+                    "kanban" => ticket_view_mode = TicketViewMode::Kanban,
+                    "calendar" => ticket_view_mode = TicketViewMode::Calendar,
                     _ => ()
                 }
+
+                board.columns = lock.get_or_default("kanban:columns", "", "").raw()
+                    .split(';')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
 
                 match lock.get_or_default("sidebar:enabled", true, "").get::<bool>() {
                     Some(sidebar_enabled) => {
@@ -134,11 +162,13 @@ impl UIController {
             running: true,
             show_sidebar: show_sidebar,
             ticket_view_mode: ticket_view_mode,
+            board,
             configuration: configuration, 
             ticket_provider: ticket_provider,
             bucket_panel: vec![],
             selected_filters: Rc::new(RefCell::new(vec![])),
             visible_tickets: vec![],
+            all_tickets: vec![],
             open_folders: Rc::new(RefCell::new(vec![])),
             invalidate_cache: true,
             overlay: overlay,
@@ -438,11 +468,33 @@ impl UIController {
 
         let max_width = ui.available_width() - (theme.font_size as f32) * 1.5 ;
 
-        for ticket in &self.visible_tickets {
+        let board_view = matches!(self.ticket_view_mode, TicketViewMode::Kanban | TicketViewMode::Calendar);
+
+        match self.ticket_view_mode {
+            TicketViewMode::Kanban => {
+                action = UserInterface::update_kanban(ui, &self.all_tickets, &mut self.board, theme, cache);
+            },
+            TicketViewMode::Calendar => {
+                action = UserInterface::update_calendar(ui, &self.all_tickets, &mut self.board, theme, cache);
+            },
+            _ => ()
+        }
+
+        if self.board.order_changed {
+            self.board.order_changed = false;
+            let joined = self.board.columns.join(";");
+            match self.configuration.lock() {
+                Ok(mut lock) => lock.put("kanban:columns", joined.as_str(), ""),
+                Err(err) => println!("Wasn't able to lock Config, when saving the Kanban order, due to {err}"),
+            }
+        }
+
+        for ticket in self.visible_tickets.iter().filter(|_| !board_view) {
             let ticket_icon = UserInterface::load_texture(icon_textures, icons, ui, &ticket.adapter);
             
 
             let temp_action = match self.ticket_view_mode {
+                TicketViewMode::Kanban | TicketViewMode::Calendar => TicketAction::None,
                 TicketViewMode::Regular => {
                     let temp_action = UserInterface::update_ticket_regular(ui, &ticket, theme, ticket_icon, cache, max_width);
                     ui.add_space(8.0);
@@ -1061,6 +1113,7 @@ impl UIController {
 
         self.using_ticket_provider_mut(|controller, provider| {
             let tickets = provider.ticket_list_from_selection(&controller.selected_filters.borrow());
+            controller.all_tickets = provider.ticket_list_all();
 
             if let Some(mut tickets) = tickets {
                 controller.visible_tickets.clear();
