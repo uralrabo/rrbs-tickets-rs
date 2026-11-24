@@ -16,6 +16,8 @@ use eframe::egui::{
 
 use tickets_rs_core::Ticket;
 
+use crate::overlays::priority::{is_priority_tag, priority_color, PRIORITY_TAGS};
+
 use crate::{
     UserInterface,
     UITheme,
@@ -29,27 +31,10 @@ use crate::{
     }
 };
 
-/// Tags that count as a priority, from highest to lowest. Matching ignores case.
-/// Change these to the tag names you actually use for priorities.
-const PRIORITY_TAGS: [&str; 3] = ["high", "medium", "low"];
-
-fn is_priority_tag(tag: &str) -> bool {
-    PRIORITY_TAGS.iter().any(|p| tag.eq_ignore_ascii_case(p))
-}
-
-/// Index into PRIORITY_TAGS of the highest priority the ticket carries, if any.
+/// Priorities are tags. The names and the helpers live in overlays/priority.rs so that the
+/// ticket masks and these views always agree.
 fn priority_rank(ticket: &Ticket) -> Option<usize> {
-    PRIORITY_TAGS
-        .iter()
-        .position(|p| ticket.tags.iter().any(|t| t.eq_ignore_ascii_case(p)))
-}
-
-fn priority_color(rank: usize) -> Color32 {
-    match rank {
-        0 => Color32::from_rgb(224, 82, 72),
-        1 => Color32::from_rgb(230, 160, 50),
-        _ => Color32::from_rgb(110, 165, 120),
-    }
+    crate::overlays::priority::priority_rank(&ticket.tags)
 }
 
 /// The "warten bis" date from the description. The parsing lives in overlays/wait_until.rs

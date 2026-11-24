@@ -2,6 +2,7 @@ mod helper;
 mod overlay_tag;
 mod overlay_ticket;
 pub mod wait_until;
+pub mod priority;
 mod overlay_about;
 mod overlay_wizard;
 mod overlay_state;

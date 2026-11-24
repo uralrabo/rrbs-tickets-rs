@@ -135,6 +135,7 @@ impl Overlay {
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
             super::wait_until::wait_field(ui, "wait_date_1", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
+            super::priority::priority_field(ui, "priority_1", &mut ticket_data.ticket.tags, None);
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
@@ -211,6 +212,13 @@ impl Overlay {
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
             super::wait_until::wait_field(ui, "wait_date_2", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
+            {
+                let existing: Vec<String> = cache.tags.keys()
+                    .filter(|t| t.adapter == ticket_data.ticket.adapter)
+                    .map(|t| t.name.clone())
+                    .collect();
+                super::priority::priority_field(ui, "priority_2", &mut ticket_data.ticket.tags, Some(&existing));
+            }
         });
     
         OverlayHelper::helper_update_section_collapsing(ui, ui_theme, "Additional", false, |ui| {
@@ -260,6 +268,13 @@ impl Overlay {
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
             super::wait_until::wait_field(ui, "wait_date_3", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
+            {
+                let existing: Vec<String> = cache.tags.keys()
+                    .filter(|t| t.adapter == ticket_data.ticket.adapter)
+                    .map(|t| t.name.clone())
+                    .collect();
+                super::priority::priority_field(ui, "priority_3", &mut ticket_data.ticket.tags, Some(&existing));
+            }
         });
     
         OverlayHelper::helper_update_section_collapsing(ui, ui_theme, "Additional", false, |ui| {
