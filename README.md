@@ -1,52 +1,62 @@
-# Tickets.rs - A Ticket Management Tool
+# rrbs-tickets-rs - A Ticket Management Tool
 
-Tickets.rs is a Desktop application made with egui, that is used for managing and modifying Tickets (or Issues, Tasks, TODO's). It's goal is to have the choice between multiple different Adapters, that can interface with different
-Systems out there, or locally to keep everything in one place: **this App**.
+> **Note:** This project is an independent continuation (hard fork) of [TheBiochemic/tickets-rs](https://github.com/TheBiochemic/tickets-rs), originally created by Robert Lang (Biochemic), as the original repository is no longer actively maintained. Licensed under the **GPLv3**.
+
+`rrbs-tickets-rs` is a desktop application built with `egui` for managing and modifying tickets, issues, tasks, and TODOs. Its goal is to combine multiple ticket sources via modular adapters or keep everything locally in one place.
 
 ![App Screenshot](assets/screenshot_app.png)
 
-Currently supported Language is **English** only.
+Currently supported UI language is **English**.
+
+---
 
 ## Features
 
-* Written in _100% safe Rust_.
-* Manage, edit and move Tickets from different Sources in one place
-* Add Tags to Tickets, to make them easily sortable
-* Create Categories or "Buckets" to sort Tickets in
-* Create Filters to view specific Combinations of Tickets, even across multiple Adapters
-* Write and view Descriptions with Commonmark (similar to Markdown)
-* Change the appearance of the Tool on the Fly (including Font Size and custom Colors)
-* Remove and Add Ticket Sources or "Adapters" to and from the App without needing to restart
-* Includes a little Wizard to get started quickly
+* Written in **100% safe Rust**
+* Manage, edit, and organize tickets from different sources in one place
+* Add tags to tickets for quick filtering and sorting
+* Create categories ("Buckets") to group tickets
+* Build custom filters to view specific combinations of tickets across multiple adapters
+* Write and preview descriptions using CommonMark (Markdown)
+* Customize appearance on the fly (including font size and custom colors)
+* Add and remove ticket sources ("Adapters") at runtime without restarting
+* Includes a built-in setup wizard to get started quickly
+
+---
 
 ## Currently Supported Adapters
-* _local:_ Tickets are stored on the Computers Hard Drive in the form of a SQLite Database. In Theory you can put this File on a Network Folder, but i haven't tested, how it reacts to being already locked. I use it via sshfs successfully.
-* _github:_ Ticket are being read from Github and cached (updated every 5 Minutes on request). There are no Filters yet, and it is purely read only. You need to supply a personal Access Token. So far i only managed to get all my Public Repositories to show (not sure, if that's any different with different Plans). However, you can also display the Repo List of other accounts via this Adapter. It is very barebones, doesn't include any Comments or details of why an issue is open/closed and no Pull Requests.
 
-## Getting Started (from Source)
+* **local:** Tickets are stored on the local drive in an SQLite database. Can also be placed on a network share (e.g., via `sshfs`), though concurrent file locking has not been extensively tested.
+* **github:** Reads and caches issues from GitHub repositories (refreshed every 5 minutes on request, read-only). Requires a GitHub Personal Access Token. Supports displaying repositories from your own account as well as other public accounts. Currently displays basic issue states without comments or pull requests.
 
-The Program is written in Rust, therefore you need to have all the necessary Tools for it installed.
-It is rather easy though:
+---
 
-* if you haven't installed Rust or Cargo, do what [this guide](https://doc.rust-lang.org/cargo/getting-started/installation.html) says.
-* Download this Repository as a .zip File and extract it or clone it with: `git clone`. (Requires git)
-* Open up the Terminal and navigate into the Folder you just downloaded until you have found the directory with the _Cargo.toml_ in there and type `cargo build --release`
-* After the build is done, there should be a new Folder called _target/release_, which will contain an executable called _tickets-rs_. Copy this file into a folder of your choice and run it.
-* If you navigate out of the _target_ folder, you should find an _assets_ folder. Copy it into the same folder as the executable. It contains all the images, the app needs.
-* _(Optional)_ make a shortcut to the executable.
+## Getting Started (Build from Source)
 
-## Getting started (with Binaries)
+Since the application is written in Rust, you need a working Rust toolchain (`rustc` and `cargo`).
 
-There is a new branch available called _releases_. In there you should be able to find the zip files of the binaries, so you can just download the version you need, unpack it and run it.
+1. **Install Rust** (if not already installed): Follow the [official Rust installation guide](https://doc.rust-lang.org/cargo/getting-started/installation.html).
+2. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/uralrabo/rrbs-tickets-rs.git](https://github.com/uralrabo/rrbs-tickets-rs.git)
+   cd rrbs-tickets-rs
 
-* [Go to Windows 10+ Releases Folder](https://github.com/TheBiochemic/tickets-rs/tree/releases/win_versions)
-* [Go to Ubuntu Releases Folder](https://github.com/TheBiochemic/tickets-rs/tree/releases/ubuntu_versions)
+Build the release binary:
 
-## Contributors
+Bash
+cargo build --release
+Run the application:
 
-The Tool is written by me, _Robert Lang (Biochemic)_ as a Project to learn Rust and advance my
-prototype of an already personally built and used Software in Python.
+Copy the compiled executable from target/release/tickets-rs (or rrbs-tickets-rs, depending on your Cargo.toml package name) to your target directory.
 
-## License
+Copy the assets folder from the repository root into the same directory as the executable (required for UI icons and images).
 
-You find the License in the LICENSE File inside of this Repository. But as tl;dr it's GPLv3.
+Launch the binary.
+
+Credits & Contributors
+Current Maintainer: uralrabo (continuation and further development)
+
+Original Author: Robert Lang (Biochemic) — creator of the original tickets-rs prototype and codebase
+
+License
+This project is licensed under the GNU General Public License v3.0 (GPLv3) — see the LICENSE file for details.
