@@ -1,5 +1,6 @@
 mod side_panel;
 mod menu_bar;
+mod board;
 mod ticket;
 
 use std::{
@@ -285,11 +286,19 @@ impl eframe::App for UserInterface {
                 })
                 .show_inside(ui, |ui| {
 
-                    ScrollArea::vertical()
+                    let wide_view = matches!(
+                        self.ui_controller.ticket_view_mode,
+                        crate::ui_controller::TicketViewMode::Kanban | crate::ui_controller::TicketViewMode::Calendar
+                    );
+                    let scroll = if wide_view { ScrollArea::both() } else { ScrollArea::vertical() };
+
+                    scroll
                         .show(ui, |ui| {
-                            let width = ui.available_width();
-                            ui.set_min_width(width);
-                            ui.set_max_width(width);
+                            if !wide_view {
+                                let width = ui.available_width();
+                                ui.set_min_width(width);
+                                ui.set_max_width(width);
+                            }
                             ui.add_space(self.ui_theme.font_size as f32 / 2.0);
                             self.ui_controller.update_each_ticket(
                                 ui, 

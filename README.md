@@ -40,23 +40,3 @@ Since the application is written in Rust, you need a working Rust toolchain (`ru
    ```bash
    git clone [https://github.com/uralrabo/rrbs-tickets-rs.git](https://github.com/uralrabo/rrbs-tickets-rs.git)
    cd rrbs-tickets-rs
-
-Build the release binary:
-
-Bash
-cargo build --release
-Run the application:
-
-Copy the compiled executable from target/release/tickets-rs (or rrbs-tickets-rs, depending on your Cargo.toml package name) to your target directory.
-
-Copy the assets folder from the repository root into the same directory as the executable (required for UI icons and images).
-
-Launch the binary.
-
-Credits & Contributors
-Current Maintainer: uralrabo (continuation and further development)
-
-Original Author: Robert Lang (Biochemic) — creator of the original tickets-rs prototype and codebase
-
-License
-This project is licensed under the GNU General Public License v3.0 (GPLv3) — see the LICENSE file for details.

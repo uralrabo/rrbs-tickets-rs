@@ -115,15 +115,22 @@ impl UserInterface {
                 let choice_list = ui.radio_value(&mut self.ui_controller.ticket_view_mode, TicketViewMode::List, "Display Tickets as list")
                     .on_hover_text_at_pointer("For a quick overview, you can switch the ticket display to a compact list.");
 
+                let choice_kanban = ui.radio_value(&mut self.ui_controller.ticket_view_mode, TicketViewMode::Kanban, "Display Tickets as Kanban board")
+                    .on_hover_text_at_pointer("One column per state. Click a ticket to edit it, use < > to move it.");
+
+                let choice_calendar = ui.radio_value(&mut self.ui_controller.ticket_view_mode, TicketViewMode::Calendar, "Display Tickets as calendar")
+                    .on_hover_text_at_pointer("Tickets by due date. Click a ticket to edit it.");
+
                 ui.separator();
 
                 let checkbox_sidebar = ui.checkbox(&mut self.ui_controller.show_sidebar, "Show Sidebar")
                     .on_hover_text_at_pointer("Toggles, if the Sidebar, that shows Filters and Adapters is hidden, or not.");
 
-
                 if choice_regular.clicked() ||
                    choice_half.clicked() ||
-                   choice_list.clicked() {
+                   choice_list.clicked() ||
+                   choice_kanban.clicked() ||
+                   choice_calendar.clicked() {
 
                     match self.ui_controller.configuration.lock(){
                         Ok(mut lock) => {
@@ -131,6 +138,8 @@ impl UserInterface {
                                 TicketViewMode::Regular => lock.put("ticket:view_mode", "regular", ""),
                                 TicketViewMode::Half => lock.put("ticket:view_mode", "half", ""),
                                 TicketViewMode::List => lock.put("ticket:view_mode", "list", ""),
+                                TicketViewMode::Kanban => lock.put("ticket:view_mode", "kanban", ""),
+                                TicketViewMode::Calendar => lock.put("ticket:view_mode", "calendar", ""),
                             }
                         },
                         Err(err) => println!("Wasn't able to lock Config, when pushing a view Button, due to {err}"),
