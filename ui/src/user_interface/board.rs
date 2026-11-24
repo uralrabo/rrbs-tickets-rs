@@ -8,8 +8,10 @@ use eframe::egui::{
     Grid,
     Label,
     RichText,
+    Rounding,
     Sense,
-    Ui
+    Ui,
+    style::Margin
 };
 
 use tickets_rs_core::Ticket;
@@ -48,6 +50,12 @@ fn priority_color(rank: usize) -> Color32 {
         1 => Color32::from_rgb(230, 160, 50),
         _ => Color32::from_rgb(110, 165, 120),
     }
+}
+
+/// The "warten bis" date from the description. The parsing lives in overlays/wait_until.rs
+/// so that the ticket masks and these views always agree.
+fn wait_date(ticket: &Ticket) -> Option<NaiveDate> {
+    crate::overlays::wait_until::wait_date(&ticket.description)
 }
 
 /// Unix seconds -> local calendar date. Returns None for unset (<= 0) values.
@@ -93,8 +101,12 @@ fn neighbour_state(columns: &[String], from: usize, step: isize, ticket: &Ticket
 
 /// One clickable line for a ticket. Left click edits it, right click opens the normal ticket menu.
 fn ticket_chip(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &UITheme, cache: &UICache) {
+    ticket_chip_ex(ui, ticket, action, theme, cache, "• ", theme.foreground_secondary);
+}
+
+fn ticket_chip_ex(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &UITheme, cache: &UICache, prefix: &str, color: Color32) {
     let response = ui.add(
-        Label::new(RichText::new(format!("• {}", ticket.title)).color(theme.foreground_secondary))
+        Label::new(RichText::new(format!("{}{}", prefix, ticket.title)).color(color))
             .truncate(true)
             .sense(Sense::click())
     ).on_hover_text(format!("{} ({})\nClick to edit, right-click for more options.", ticket.title, ticket.state_name));
@@ -109,6 +121,52 @@ fn ticket_chip(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &
 
 impl UserInterface {
 
+    /// Red bar listing every ticket whose "warten bis" date is today or in the past.
+    pub fn update_wait_banner(ui: &mut Ui, tickets: &[Ticket]) -> TicketAction {
+        let mut action = TicketAction::None;
+        let today = Local::now().naive_local().date();
+
+        let mut due: Vec<(NaiveDate, &Ticket)> = tickets
+            .iter()
+            .filter_map(|t| wait_date(t).filter(|d| *d <= today).map(|d| (d, t)))
+            .collect();
+
+        if due.is_empty() {
+            return action;
+        }
+        due.sort_by_key(|(date, ticket)| (*date, ticket.id));
+
+        Frame::none()
+            .fill(Color32::from_rgb(150, 35, 35))
+            .inner_margin(Margin::same(8.0))
+            .rounding(Rounding::same(4.0))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!("{} ticket(s) done waiting", due.len()))
+                        .strong()
+                        .color(Color32::WHITE)
+                );
+
+                for (date, ticket) in due {
+                    let response = ui.add(
+                        Label::new(
+                            RichText::new(format!("{} (since {})", ticket.title, date.format("%d.%m.%Y")))
+                                .color(Color32::WHITE)
+                                .underline()
+                        ).sense(Sense::click())
+                    ).on_hover_text("Click to open. Remove the 'warten bis' line from the description to dismiss this.");
+
+                    if response.clicked() {
+                        action = TicketAction::UpdateDetails(Identifier::new(&ticket.adapter, ticket.id));
+                    }
+                }
+            });
+
+        ui.add_space(8.0);
+
+        action
+    }
+
     pub fn update_kanban(
         ui: &mut Ui,
         tickets: &[Ticket],
@@ -120,6 +178,7 @@ impl UserInterface {
 
         sync_columns(board, tickets, cache);
 
+        let today = Local::now().naive_local().date();
         let col_width = (theme.font_size as f32 * 18.0).max(240.0);
         let columns = board.columns.clone();
         let mut swap: Option<(usize, usize)> = None;
@@ -185,6 +244,21 @@ impl UserInterface {
                             }
                             if !meta.is_empty() {
                                 ui.label(RichText::new(meta.join(" · ")).color(theme.foreground_secondary).small());
+                            }
+
+                            if let Some(date) = wait_date(ticket) {
+                                if date <= today {
+                                    ui.label(
+                                        RichText::new(format!("Done waiting ({})", date.format("%d.%m.%Y")))
+                                            .color(Color32::from_rgb(224, 82, 72))
+                                            .strong()
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new(format!("Waiting until {}", date.format("%d.%m.%Y")))
+                                            .color(Color32::from_rgb(230, 160, 50))
+                                    );
+                                }
                             }
 
                             ui.horizontal(|ui| {
@@ -280,6 +354,13 @@ impl UserInterface {
             }
         }
 
+        let mut wait_by_day: HashMap<NaiveDate, Vec<&Ticket>> = HashMap::new();
+        for ticket in tickets {
+            if let Some(date) = wait_date(ticket) {
+                wait_by_day.entry(date).or_default().push(ticket);
+            }
+        }
+
         let in_month = tickets.iter()
             .filter(|t| ticket_date(t.due_at).map_or(false, |d| d >= first && d < next_first))
             .count();
@@ -328,6 +409,12 @@ impl UserInterface {
                             if let Some(list) = date.and_then(|d| by_day.get(&d)) {
                                 for ticket in list {
                                     ticket_chip(ui, ticket, &mut action, theme, cache);
+                                }
+                            }
+
+                            if let Some(list) = date.and_then(|d| wait_by_day.get(&d)) {
+                                for ticket in list {
+                                    ticket_chip_ex(ui, ticket, &mut action, theme, cache, "wait: ", Color32::from_rgb(230, 160, 50));
                                 }
                             }
                         }

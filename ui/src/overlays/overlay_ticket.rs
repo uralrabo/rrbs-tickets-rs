@@ -134,6 +134,7 @@ impl Overlay {
             OverlayHelper::helper_update_text(ui, ui_theme, &mut ticket_data.ticket.title, "Name:");
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
+            super::wait_until::wait_field(ui, "wait_date_1", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
@@ -209,6 +210,7 @@ impl Overlay {
             OverlayHelper::helper_update_text(ui, ui_theme, &mut ticket_data.ticket.title, "Name:");
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
+            super::wait_until::wait_field(ui, "wait_date_2", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
         });
     
         OverlayHelper::helper_update_section_collapsing(ui, ui_theme, "Additional", false, |ui| {
@@ -257,6 +259,7 @@ impl Overlay {
             OverlayHelper::helper_update_text(ui, ui_theme, &mut ticket_data.ticket.title, "Name:");
             OverlayHelper::helper_update_small_spacer(ui, ui_theme);
             OverlayHelper::helper_update_desc(ui, ui_theme, &mut ticket_data.ticket.description, true);
+            super::wait_until::wait_field(ui, "wait_date_3", &ticket_data.ticket.state_name, &mut ticket_data.ticket.description);
         });
     
         OverlayHelper::helper_update_section_collapsing(ui, ui_theme, "Additional", false, |ui| {
