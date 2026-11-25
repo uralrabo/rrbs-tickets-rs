@@ -2,17 +2,28 @@ use std::collections::HashMap;
 
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Utc};
 use eframe::egui::{
+    Area,
     CollapsingHeader,
     Color32,
+    CursorIcon,
     Frame,
     Grid,
+    Id,
     Label,
+    Order,
+    Rect,
     RichText,
+    Rounding,
     Sense,
-    Ui
+    Stroke,
+    Ui,
+    style::Margin,
+    vec2
 };
 
 use tickets_rs_core::Ticket;
+
+use crate::overlays::priority::{is_priority_tag, priority_color, PRIORITY_TAGS};
 
 use crate::{
     UserInterface,
@@ -27,27 +38,16 @@ use crate::{
     }
 };
 
-/// Tags that count as a priority, from highest to lowest. Matching ignores case.
-/// Change these to the tag names you actually use for priorities.
-const PRIORITY_TAGS: [&str; 3] = ["high", "medium", "low"];
-
-fn is_priority_tag(tag: &str) -> bool {
-    PRIORITY_TAGS.iter().any(|p| tag.eq_ignore_ascii_case(p))
-}
-
-/// Index into PRIORITY_TAGS of the highest priority the ticket carries, if any.
+/// Priorities are tags. The names and the helpers live in overlays/priority.rs so that the
+/// ticket masks and these views always agree.
 fn priority_rank(ticket: &Ticket) -> Option<usize> {
-    PRIORITY_TAGS
-        .iter()
-        .position(|p| ticket.tags.iter().any(|t| t.eq_ignore_ascii_case(p)))
+    crate::overlays::priority::priority_rank(&ticket.tags)
 }
 
-fn priority_color(rank: usize) -> Color32 {
-    match rank {
-        0 => Color32::from_rgb(224, 82, 72),
-        1 => Color32::from_rgb(230, 160, 50),
-        _ => Color32::from_rgb(110, 165, 120),
-    }
+/// The "warten bis" date from the description. The parsing lives in overlays/wait_until.rs
+/// so that the ticket masks and these views always agree.
+fn wait_date(ticket: &Ticket) -> Option<NaiveDate> {
+    crate::overlays::wait_until::wait_date(&ticket.description)
 }
 
 /// Unix seconds -> local calendar date. Returns None for unset (<= 0) values.
@@ -93,8 +93,12 @@ fn neighbour_state(columns: &[String], from: usize, step: isize, ticket: &Ticket
 
 /// One clickable line for a ticket. Left click edits it, right click opens the normal ticket menu.
 fn ticket_chip(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &UITheme, cache: &UICache) {
+    ticket_chip_ex(ui, ticket, action, theme, cache, "• ", theme.foreground_secondary);
+}
+
+fn ticket_chip_ex(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &UITheme, cache: &UICache, prefix: &str, color: Color32) {
     let response = ui.add(
-        Label::new(RichText::new(format!("• {}", ticket.title)).color(theme.foreground_secondary))
+        Label::new(RichText::new(format!("{}{}", prefix, ticket.title)).color(color))
             .truncate(true)
             .sense(Sense::click())
     ).on_hover_text(format!("{} ({})\nClick to edit, right-click for more options.", ticket.title, ticket.state_name));
@@ -109,6 +113,52 @@ fn ticket_chip(ui: &mut Ui, ticket: &Ticket, action: &mut TicketAction, theme: &
 
 impl UserInterface {
 
+    /// Red bar listing every ticket whose "warten bis" date is today or in the past.
+    pub fn update_wait_banner(ui: &mut Ui, tickets: &[Ticket]) -> TicketAction {
+        let mut action = TicketAction::None;
+        let today = Local::now().naive_local().date();
+
+        let mut due: Vec<(NaiveDate, &Ticket)> = tickets
+            .iter()
+            .filter_map(|t| wait_date(t).filter(|d| *d <= today).map(|d| (d, t)))
+            .collect();
+
+        if due.is_empty() {
+            return action;
+        }
+        due.sort_by_key(|(date, ticket)| (*date, ticket.id));
+
+        Frame::none()
+            .fill(Color32::from_rgb(150, 35, 35))
+            .inner_margin(Margin::same(8.0))
+            .rounding(Rounding::same(4.0))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!("{} ticket(s) done waiting", due.len()))
+                        .strong()
+                        .color(Color32::WHITE)
+                );
+
+                for (date, ticket) in due {
+                    let response = ui.add(
+                        Label::new(
+                            RichText::new(format!("{} (since {})", ticket.title, date.format("%d.%m.%Y")))
+                                .color(Color32::WHITE)
+                                .underline()
+                        ).sense(Sense::click())
+                    ).on_hover_text("Click to open. Remove the 'warten bis' line from the description to dismiss this.");
+
+                    if response.clicked() {
+                        action = TicketAction::UpdateDetails(Identifier::new(&ticket.adapter, ticket.id));
+                    }
+                }
+            });
+
+        ui.add_space(8.0);
+
+        action
+    }
+
     pub fn update_kanban(
         ui: &mut Ui,
         tickets: &[Ticket],
@@ -120,16 +170,79 @@ impl UserInterface {
 
         sync_columns(board, tickets, cache);
 
+        // Forget hidden columns whose state no longer exists.
+        let existing = board.columns.clone();
+        board.hidden.retain(|h| existing.contains(h));
+
+        let today = Local::now().naive_local().date();
         let col_width = (theme.font_size as f32 * 18.0).max(240.0);
-        let columns = board.columns.clone();
+        // Only the columns that are not hidden are drawn.
+        let columns: Vec<String> = board.columns.iter().filter(|c| !board.hidden.contains(*c)).cloned().collect();
         let mut swap: Option<(usize, usize)> = None;
+
+        // Drag and drop: which ticket is being dragged, and where the columns were last frame.
+        let drag_key = Id::new("kanban_drag_ticket");
+        let rects_key = Id::new("kanban_column_rects");
+        let dragging: Option<(String, i64)> = ui.ctx().data(|d| d.get_temp(drag_key));
+        let previous_rects: Vec<(String, Rect)> = ui.ctx().data(|d| d.get_temp(rects_key)).unwrap_or_default();
+        let mut new_rects: Vec<(String, Rect)> = vec![];
+        let mut started_drag: Option<(String, i64)> = None;
+
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let dragged_ticket: Option<&Ticket> = dragging.as_ref().and_then(|(adapter, id)| {
+            tickets.iter().find(|t| &t.adapter == adapter && t.id == *id)
+        });
+        let drop_target: Option<String> = pointer.and_then(|pos| {
+            previous_rects.iter().find(|(_, rect)| rect.contains(pos)).map(|(name, _)| name.clone())
+        });
+        let drop_allowed = match (dragged_ticket, &drop_target) {
+            (Some(t), Some(name)) => {
+                *name != t.state_name
+                    && cache.states.keys().any(|s| &s.name == name && s.adapter == t.adapter)
+            },
+            _ => false,
+        };
+
+        let mut hide: Option<String> = None;
+        let mut show: Option<String> = None;
+
+        let mut show_all = false;
+        let mut hide_empty = false;
+
+        // Checklist: tick a column to show it, untick it to hide it.
+        ui.horizontal(|ui| {
+            ui.menu_button(format!("Columns ({}/{})", columns.len(), board.columns.len()), |ui| {
+                ui.horizontal(|ui| {
+                    if ui.small_button("Show all").clicked() {
+                        show_all = true;
+                    }
+                    if ui.small_button("Hide empty").on_hover_text("Hides every column without tickets.").clicked() {
+                        hide_empty = true;
+                    }
+                });
+                ui.separator();
+
+                for name in board.columns.iter() {
+                    let count = tickets.iter().filter(|t| &t.state_name == name).count();
+                    let mut shown = !board.hidden.contains(name);
+                    if ui.checkbox(&mut shown, format!("{} ({})", name, count)).changed() {
+                        if shown {
+                            show = Some(name.clone());
+                        } else {
+                            hide = Some(name.clone());
+                        }
+                    }
+                }
+            });
+        });
+        ui.add_space(6.0);
 
         ui.horizontal_top(|ui| {
             for (ci, name) in columns.iter().enumerate() {
                 let mut in_column: Vec<&Ticket> = tickets.iter().filter(|t| &t.state_name == name).collect();
                 in_column.sort_by_key(|t| priority_rank(t).unwrap_or(usize::MAX));
 
-                ui.vertical(|ui| {
+                let col_response = ui.vertical(|ui| {
                     ui.set_width(col_width);
 
                     ui.horizontal(|ui| {
@@ -140,6 +253,9 @@ impl UserInterface {
                         }
                         if ci + 1 < columns.len() && ui.small_button(">").on_hover_text("Move column right").clicked() {
                             swap = Some((ci, ci + 1));
+                        }
+                        if ui.small_button("x").on_hover_text("Hide this column. Bring it back from the 'Hidden columns' row.").clicked() {
+                            hide = Some(name.clone());
                         }
                     });
 
@@ -160,10 +276,13 @@ impl UserInterface {
 
                             let title = ui.add(
                                 Label::new(RichText::new(&ticket.title).strong())
-                                    .sense(Sense::click())
-                            ).on_hover_text("Click to edit. Right-click for more options.");
+                                    .sense(Sense::click_and_drag())
+                            ).on_hover_text("Click to edit. Drag to another column to change the state. Right-click for more options.");
 
                             let clicked = title.clicked();
+                            if title.drag_started() {
+                                started_drag = Some((ticket.adapter.clone(), ticket.id));
+                            }
                             UserInterface::update_ticket_context_menu(title, &mut action, ui, ticket, theme, cache);
                             if clicked {
                                 action = TicketAction::UpdateDetails(Identifier::new(&ticket.adapter, ticket.id));
@@ -185,6 +304,21 @@ impl UserInterface {
                             }
                             if !meta.is_empty() {
                                 ui.label(RichText::new(meta.join(" · ")).color(theme.foreground_secondary).small());
+                            }
+
+                            if let Some(date) = wait_date(ticket) {
+                                if date <= today {
+                                    ui.label(
+                                        RichText::new(format!("Done waiting ({})", date.format("%d.%m.%Y")))
+                                            .color(Color32::from_rgb(224, 82, 72))
+                                            .strong()
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new(format!("Waiting until {}", date.format("%d.%m.%Y")))
+                                            .color(Color32::from_rgb(230, 160, 50))
+                                    );
+                                }
                             }
 
                             ui.horizontal(|ui| {
@@ -210,12 +344,94 @@ impl UserInterface {
                     }
                 });
 
+                // The drop zone reaches down to the bottom of the visible area, so short columns are easy to hit.
+                let mut zone = col_response.response.rect;
+                zone.max.y = zone.max.y.max(ui.clip_rect().max.y);
+                new_rects.push((name.clone(), zone.expand2(vec2(4.0, 0.0))));
+
                 ui.add_space(8.0);
             }
         });
 
+        ui.ctx().data_mut(|d| d.insert_temp(rects_key, new_rects));
+
+        if let Some(started) = started_drag {
+            ui.ctx().data_mut(|d| d.insert_temp(drag_key, started));
+        }
+
+        if dragging.is_some() {
+            if ui.input(|i| i.pointer.any_released()) {
+                if drop_allowed {
+                    if let (Some(t), Some(name)) = (dragged_ticket, &drop_target) {
+                        action = TicketAction::UpdateStateImmediate(
+                            Identifier::new(&t.adapter, t.id),
+                            name.clone()
+                        );
+                    }
+                }
+                ui.ctx().data_mut(|d| d.remove::<(String, i64)>(drag_key));
+            } else {
+                ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+
+                if let Some(name) = &drop_target {
+                    if let Some((_, rect)) = previous_rects.iter().find(|(n, _)| n == name) {
+                        let color = if drop_allowed {
+                            Color32::from_rgb(90, 170, 110)
+                        } else {
+                            Color32::from_rgb(224, 82, 72)
+                        };
+                        ui.painter().rect_stroke(*rect, 6.0, Stroke::new(2.0, color));
+                    }
+                }
+
+                if let (Some(t), Some(pos)) = (dragged_ticket, pointer) {
+                    Area::new("kanban_drag_ghost")
+                        .order(Order::Tooltip)
+                        .interactable(false)
+                        .fixed_pos(pos + vec2(14.0, 14.0))
+                        .show(ui.ctx(), |ui| {
+                            Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.label(RichText::new(&t.title).strong());
+                            });
+                        });
+                }
+            }
+        }
+
+        // The indexes refer to the visible columns, so look the columns up by name.
         if let Some((a, b)) = swap {
-            board.columns.swap(a, b);
+            let pos_a = board.columns.iter().position(|c| *c == columns[a]);
+            let pos_b = board.columns.iter().position(|c| *c == columns[b]);
+            if let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) {
+                board.columns.swap(pos_a, pos_b);
+                board.order_changed = true;
+            }
+        }
+
+        if let Some(name) = hide {
+            if !board.hidden.contains(&name) {
+                board.hidden.push(name);
+            }
+            board.order_changed = true;
+        }
+
+        if let Some(name) = show {
+            board.hidden.retain(|h| *h != name);
+            board.order_changed = true;
+        }
+
+        if show_all && !board.hidden.is_empty() {
+            board.hidden.clear();
+            board.order_changed = true;
+        }
+
+        if hide_empty {
+            for name in board.columns.clone() {
+                let has_tickets = tickets.iter().any(|t| t.state_name == name);
+                if !has_tickets && !board.hidden.contains(&name) {
+                    board.hidden.push(name);
+                }
+            }
             board.order_changed = true;
         }
 
@@ -280,6 +496,13 @@ impl UserInterface {
             }
         }
 
+        let mut wait_by_day: HashMap<NaiveDate, Vec<&Ticket>> = HashMap::new();
+        for ticket in tickets {
+            if let Some(date) = wait_date(ticket) {
+                wait_by_day.entry(date).or_default().push(ticket);
+            }
+        }
+
         let in_month = tickets.iter()
             .filter(|t| ticket_date(t.due_at).map_or(false, |d| d >= first && d < next_first))
             .count();
@@ -328,6 +551,12 @@ impl UserInterface {
                             if let Some(list) = date.and_then(|d| by_day.get(&d)) {
                                 for ticket in list {
                                     ticket_chip(ui, ticket, &mut action, theme, cache);
+                                }
+                            }
+
+                            if let Some(list) = date.and_then(|d| wait_by_day.get(&d)) {
+                                for ticket in list {
+                                    ticket_chip_ex(ui, ticket, &mut action, theme, cache, "wait: ", Color32::from_rgb(230, 160, 50));
                                 }
                             }
                         }

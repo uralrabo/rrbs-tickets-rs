@@ -69,6 +69,7 @@ pub enum TicketViewMode {
 
 pub struct BoardState {
     pub columns: Vec<String>,
+    pub hidden: Vec<String>,
     pub order_changed: bool,
     pub cal_year: i32,
     pub cal_month: u32,
@@ -78,7 +79,7 @@ impl Default for BoardState {
     fn default() -> Self {
         use chrono::Datelike;
         let now = chrono::Local::now();
-        BoardState { columns: vec![], order_changed: false, cal_year: now.year(), cal_month: now.month() }
+        BoardState { columns: vec![], hidden: vec![], order_changed: false, cal_year: now.year(), cal_month: now.month() }
     }
 }
 
@@ -142,6 +143,12 @@ impl UIController {
                 }
 
                 board.columns = lock.get_or_default("kanban:columns", "", "").raw()
+                    .split(';')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
+
+                board.hidden = lock.get_or_default("kanban:hidden", "", "").raw()
                     .split(';')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
@@ -483,8 +490,12 @@ impl UIController {
         if self.board.order_changed {
             self.board.order_changed = false;
             let joined = self.board.columns.join(";");
+            let hidden = self.board.hidden.join(";");
             match self.configuration.lock() {
-                Ok(mut lock) => lock.put("kanban:columns", joined.as_str(), ""),
+                Ok(mut lock) => {
+                    lock.put("kanban:columns", joined.as_str(), "");
+                    lock.put("kanban:hidden", hidden.as_str(), "");
+                },
                 Err(err) => println!("Wasn't able to lock Config, when saving the Kanban order, due to {err}"),
             }
         }
