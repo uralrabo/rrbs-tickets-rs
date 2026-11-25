@@ -2,16 +2,23 @@ use std::collections::HashMap;
 
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Utc};
 use eframe::egui::{
+    Area,
     CollapsingHeader,
     Color32,
+    CursorIcon,
     Frame,
     Grid,
+    Id,
     Label,
+    Order,
+    Rect,
     RichText,
     Rounding,
     Sense,
+    Stroke,
     Ui,
-    style::Margin
+    style::Margin,
+    vec2
 };
 
 use tickets_rs_core::Ticket;
@@ -163,17 +170,79 @@ impl UserInterface {
 
         sync_columns(board, tickets, cache);
 
+        // Forget hidden columns whose state no longer exists.
+        let existing = board.columns.clone();
+        board.hidden.retain(|h| existing.contains(h));
+
         let today = Local::now().naive_local().date();
         let col_width = (theme.font_size as f32 * 18.0).max(240.0);
-        let columns = board.columns.clone();
+        // Only the columns that are not hidden are drawn.
+        let columns: Vec<String> = board.columns.iter().filter(|c| !board.hidden.contains(*c)).cloned().collect();
         let mut swap: Option<(usize, usize)> = None;
+
+        // Drag and drop: which ticket is being dragged, and where the columns were last frame.
+        let drag_key = Id::new("kanban_drag_ticket");
+        let rects_key = Id::new("kanban_column_rects");
+        let dragging: Option<(String, i64)> = ui.ctx().data(|d| d.get_temp(drag_key));
+        let previous_rects: Vec<(String, Rect)> = ui.ctx().data(|d| d.get_temp(rects_key)).unwrap_or_default();
+        let mut new_rects: Vec<(String, Rect)> = vec![];
+        let mut started_drag: Option<(String, i64)> = None;
+
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let dragged_ticket: Option<&Ticket> = dragging.as_ref().and_then(|(adapter, id)| {
+            tickets.iter().find(|t| &t.adapter == adapter && t.id == *id)
+        });
+        let drop_target: Option<String> = pointer.and_then(|pos| {
+            previous_rects.iter().find(|(_, rect)| rect.contains(pos)).map(|(name, _)| name.clone())
+        });
+        let drop_allowed = match (dragged_ticket, &drop_target) {
+            (Some(t), Some(name)) => {
+                *name != t.state_name
+                    && cache.states.keys().any(|s| &s.name == name && s.adapter == t.adapter)
+            },
+            _ => false,
+        };
+
+        let mut hide: Option<String> = None;
+        let mut show: Option<String> = None;
+
+        let mut show_all = false;
+        let mut hide_empty = false;
+
+        // Checklist: tick a column to show it, untick it to hide it.
+        ui.horizontal(|ui| {
+            ui.menu_button(format!("Columns ({}/{})", columns.len(), board.columns.len()), |ui| {
+                ui.horizontal(|ui| {
+                    if ui.small_button("Show all").clicked() {
+                        show_all = true;
+                    }
+                    if ui.small_button("Hide empty").on_hover_text("Hides every column without tickets.").clicked() {
+                        hide_empty = true;
+                    }
+                });
+                ui.separator();
+
+                for name in board.columns.iter() {
+                    let count = tickets.iter().filter(|t| &t.state_name == name).count();
+                    let mut shown = !board.hidden.contains(name);
+                    if ui.checkbox(&mut shown, format!("{} ({})", name, count)).changed() {
+                        if shown {
+                            show = Some(name.clone());
+                        } else {
+                            hide = Some(name.clone());
+                        }
+                    }
+                }
+            });
+        });
+        ui.add_space(6.0);
 
         ui.horizontal_top(|ui| {
             for (ci, name) in columns.iter().enumerate() {
                 let mut in_column: Vec<&Ticket> = tickets.iter().filter(|t| &t.state_name == name).collect();
                 in_column.sort_by_key(|t| priority_rank(t).unwrap_or(usize::MAX));
 
-                ui.vertical(|ui| {
+                let col_response = ui.vertical(|ui| {
                     ui.set_width(col_width);
 
                     ui.horizontal(|ui| {
@@ -184,6 +253,9 @@ impl UserInterface {
                         }
                         if ci + 1 < columns.len() && ui.small_button(">").on_hover_text("Move column right").clicked() {
                             swap = Some((ci, ci + 1));
+                        }
+                        if ui.small_button("x").on_hover_text("Hide this column. Bring it back from the 'Hidden columns' row.").clicked() {
+                            hide = Some(name.clone());
                         }
                     });
 
@@ -204,10 +276,13 @@ impl UserInterface {
 
                             let title = ui.add(
                                 Label::new(RichText::new(&ticket.title).strong())
-                                    .sense(Sense::click())
-                            ).on_hover_text("Click to edit. Right-click for more options.");
+                                    .sense(Sense::click_and_drag())
+                            ).on_hover_text("Click to edit. Drag to another column to change the state. Right-click for more options.");
 
                             let clicked = title.clicked();
+                            if title.drag_started() {
+                                started_drag = Some((ticket.adapter.clone(), ticket.id));
+                            }
                             UserInterface::update_ticket_context_menu(title, &mut action, ui, ticket, theme, cache);
                             if clicked {
                                 action = TicketAction::UpdateDetails(Identifier::new(&ticket.adapter, ticket.id));
@@ -269,12 +344,94 @@ impl UserInterface {
                     }
                 });
 
+                // The drop zone reaches down to the bottom of the visible area, so short columns are easy to hit.
+                let mut zone = col_response.response.rect;
+                zone.max.y = zone.max.y.max(ui.clip_rect().max.y);
+                new_rects.push((name.clone(), zone.expand2(vec2(4.0, 0.0))));
+
                 ui.add_space(8.0);
             }
         });
 
+        ui.ctx().data_mut(|d| d.insert_temp(rects_key, new_rects));
+
+        if let Some(started) = started_drag {
+            ui.ctx().data_mut(|d| d.insert_temp(drag_key, started));
+        }
+
+        if dragging.is_some() {
+            if ui.input(|i| i.pointer.any_released()) {
+                if drop_allowed {
+                    if let (Some(t), Some(name)) = (dragged_ticket, &drop_target) {
+                        action = TicketAction::UpdateStateImmediate(
+                            Identifier::new(&t.adapter, t.id),
+                            name.clone()
+                        );
+                    }
+                }
+                ui.ctx().data_mut(|d| d.remove::<(String, i64)>(drag_key));
+            } else {
+                ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+
+                if let Some(name) = &drop_target {
+                    if let Some((_, rect)) = previous_rects.iter().find(|(n, _)| n == name) {
+                        let color = if drop_allowed {
+                            Color32::from_rgb(90, 170, 110)
+                        } else {
+                            Color32::from_rgb(224, 82, 72)
+                        };
+                        ui.painter().rect_stroke(*rect, 6.0, Stroke::new(2.0, color));
+                    }
+                }
+
+                if let (Some(t), Some(pos)) = (dragged_ticket, pointer) {
+                    Area::new("kanban_drag_ghost")
+                        .order(Order::Tooltip)
+                        .interactable(false)
+                        .fixed_pos(pos + vec2(14.0, 14.0))
+                        .show(ui.ctx(), |ui| {
+                            Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.label(RichText::new(&t.title).strong());
+                            });
+                        });
+                }
+            }
+        }
+
+        // The indexes refer to the visible columns, so look the columns up by name.
         if let Some((a, b)) = swap {
-            board.columns.swap(a, b);
+            let pos_a = board.columns.iter().position(|c| *c == columns[a]);
+            let pos_b = board.columns.iter().position(|c| *c == columns[b]);
+            if let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) {
+                board.columns.swap(pos_a, pos_b);
+                board.order_changed = true;
+            }
+        }
+
+        if let Some(name) = hide {
+            if !board.hidden.contains(&name) {
+                board.hidden.push(name);
+            }
+            board.order_changed = true;
+        }
+
+        if let Some(name) = show {
+            board.hidden.retain(|h| *h != name);
+            board.order_changed = true;
+        }
+
+        if show_all && !board.hidden.is_empty() {
+            board.hidden.clear();
+            board.order_changed = true;
+        }
+
+        if hide_empty {
+            for name in board.columns.clone() {
+                let has_tickets = tickets.iter().any(|t| t.state_name == name);
+                if !has_tickets && !board.hidden.contains(&name) {
+                    board.hidden.push(name);
+                }
+            }
             board.order_changed = true;
         }
 
