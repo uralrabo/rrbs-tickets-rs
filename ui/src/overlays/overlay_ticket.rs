@@ -93,6 +93,7 @@ impl Overlay {
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_1", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
 
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Update".to_string())) {
@@ -113,6 +114,7 @@ impl Overlay {
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_2", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
 
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Assign".to_string())) {
@@ -139,6 +141,7 @@ impl Overlay {
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_3", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
 
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Update".to_string())) {
@@ -161,6 +164,7 @@ impl Overlay {
         });
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_4", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
 
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Move".to_string())) {
@@ -182,6 +186,7 @@ impl Overlay {
             ticket_data.ticket.title, ticket_data.ticket.adapter).as_str());
 
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_5", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
 
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Delete".to_string())) {
@@ -297,6 +302,7 @@ impl Overlay {
         });
     
         OverlayHelper::helper_update_small_spacer(ui, ui_theme);
+        super::attachments::attachments_field(ui, "attachments_6", &ticket_data.ticket.adapter, ticket_data.ticket.id);
         OverlayHelper::helper_update_errors(ui, ui_theme, &ticket_data.errors);
         match OverlayHelper::helper_update_dialog_buttons(ui, ui_theme, Some("Edit".to_string())) {
             DialogOptions::Nothing => OverlayAction::Nothing,

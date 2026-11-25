@@ -3,6 +3,7 @@ mod overlay_tag;
 mod overlay_ticket;
 pub mod wait_until;
 pub mod priority;
+pub mod attachments;
 mod overlay_about;
 mod overlay_wizard;
 mod overlay_state;
