@@ -10,8 +10,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-use eframe::egui::{Id, RichText, Ui};
+use eframe::egui::{Button, Id, RichText, Ui};
 
 const ROOT: &str = "attachments";
 
@@ -140,6 +143,68 @@ pub fn open(adapter: &str, ticket_id: i64, name: &str) -> Result<(), String> {
     open_path(&path)
 }
 
+/// What the file dialog thread hands back: the chosen files, or an error message.
+type PickResult = Arc<Mutex<Option<Result<Vec<PathBuf>, String>>>>;
+
+fn lines_to_paths(bytes: &[u8]) -> Vec<PathBuf> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Shows the system's file dialog through zenity or kdialog, so no extra library is needed.
+/// A cancelled dialog returns an empty list.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn pick_files() -> Result<Vec<PathBuf>, String> {
+    let attempts: Vec<(&str, Vec<&str>)> = vec![
+        ("zenity", vec!["--file-selection", "--multiple", "--separator=\n", "--title=Attach files"]),
+        ("kdialog", vec!["--getopenfilename", ".", "--multiple", "--separate-output", "--title", "Attach files"]),
+    ];
+
+    for (program, args) in attempts.iter() {
+        match Command::new(program).args(args.iter()).output() {
+            Ok(output) => {
+                // 0 means files were chosen, 1 means the dialog was cancelled.
+                let code = output.status.code();
+                if code != Some(0) && code != Some(1) {
+                    let text = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    return Err(if text.is_empty() { format!("{} failed", program) } else { text });
+                }
+                return Ok(lines_to_paths(&output.stdout));
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+
+    Err("No file dialog found. Install zenity or kdialog, or type the path.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn pick_files() -> Result<Vec<PathBuf>, String> {
+    let output = Command::new("osascript")
+        .args(["-e", "POSIX path of (choose file)"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+    Ok(lines_to_paths(&output.stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn pick_files() -> Result<Vec<PathBuf>, String> {
+    let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Multiselect = $true; if ($d.ShowDialog() -eq 'OK') { $d.FileNames -join \"`n\" }";
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-STA", "-Command", script])
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(lines_to_paths(&output.stdout))
+}
+
 fn human_size(size: u64) -> String {
     let s = size as f64;
     if s < 1024.0 {
@@ -186,9 +251,33 @@ pub fn attachments_field(ui: &mut Ui, id: &str, adapter: &str, ticket_id: i64) {
         });
     }
 
+    // Result of the file dialog, if one was opened.
+    let pick_key = Id::new(("attachment_pick", id));
+    let pending: Option<PickResult> = ui.ctx().data(|d| d.get_temp(pick_key));
+    if let Some(pending_pick) = &pending {
+        let finished = pending_pick.lock().ok().and_then(|mut guard| guard.take());
+        match finished {
+            Some(Ok(paths)) => {
+                for path in paths {
+                    message = Some(match add(adapter, ticket_id, &path) {
+                        Ok(name) => format!("Attached {}", name),
+                        Err(err) => format!("Could not attach: {}", err),
+                    });
+                }
+                ui.ctx().data_mut(|d| d.remove::<PickResult>(pick_key));
+            },
+            Some(Err(err)) => {
+                message = Some(format!("File dialog: {}", err));
+                ui.ctx().data_mut(|d| d.remove::<PickResult>(pick_key));
+            },
+            None => ui.ctx().request_repaint_after(Duration::from_millis(200)),
+        }
+    }
+    let waiting = ui.ctx().data(|d| d.get_temp::<PickResult>(pick_key)).is_some();
+
     let files = list(adapter, ticket_id);
     if files.is_empty() {
-        ui.label(RichText::new("No attachments yet. Drop files onto this window or add a path below.").small());
+        ui.label(RichText::new("No attachments yet. Use Browse..., drop files onto this window or type a path below.").small());
     }
 
     for (name, size) in &files {
@@ -218,7 +307,31 @@ pub fn attachments_field(ui: &mut Ui, id: &str, adapter: &str, ticket_id: i64) {
         });
     }
 
-    // Typing a path is the fallback when dropping files is not available.
+    ui.horizontal(|ui| {
+        if ui.add_enabled(!waiting, Button::new("Browse..."))
+            .on_hover_text("Choose files with the system file dialog.")
+            .clicked() {
+            let result: PickResult = Arc::new(Mutex::new(None));
+            let thread_result = result.clone();
+            let ctx = ui.ctx().clone();
+
+            // The dialog runs in its own thread so the window stays responsive.
+            thread::spawn(move || {
+                let picked = pick_files();
+                if let Ok(mut guard) = thread_result.lock() {
+                    *guard = Some(picked);
+                }
+                ctx.request_repaint();
+            });
+
+            ui.ctx().data_mut(|d| d.insert_temp(pick_key, result));
+        }
+        if waiting {
+            ui.label(RichText::new("Waiting for the file dialog...").small());
+        }
+    });
+
+    // Typing a path is the fallback when no file dialog is available.
     let mut path_text: String = ui.ctx().data(|d| d.get_temp(path_key)).unwrap_or_default();
     ui.horizontal(|ui| {
         ui.label("Add file:");
