@@ -40,3 +40,15 @@ Since the application is written in Rust, you need a working Rust toolchain (`ru
    ```bash
    git clone [https://github.com/uralrabo/rrbs-tickets-rs.git](https://github.com/uralrabo/rrbs-tickets-rs.git)
    cd rrbs-tickets-rs
+
+
+## Contributors
+
+The original project, tickets-rs, was created by Robert Lang (Biochemic).
+
+This independent continuation is maintained by Ralf Boehm (rrbs), who is further developing it as a personal learning project.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0.
+See the `LICENSE` file for the full license text.
